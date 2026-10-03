@@ -26,8 +26,14 @@
 
 ```bash
 dsh plugin add github:asdukw/dsh-plugin-android-tools
-# npm 首次发布后也可以：
-dsh plugin add dsh-plugin-android-tools
+# 锁定 release tag：
+dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.1.0
+```
+
+每个 GitHub Release 都附有 `npm pack` 打出的 tarball，也可以直接安装：
+
+```bash
+dsh plugin add ./dsh-plugin-android-tools-0.1.0.tgz
 ```
 
 包内声明了 `dsh.bundle` 层（`cordis.patch.yml`），安装时自动插入插件行；之后重启 `dsh`。
@@ -87,14 +93,19 @@ body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
 npm test
 ```
 
-发布：第一个版本需要本地发布 —— npm 不支持为尚不存在的包配置 trusted publisher：
+发布：推 `v*` tag 即可。`release` workflow 会跑测试、`npm pack` 打包，并创建附带
+`.tgz` 的 GitHub Release（可用 `dsh plugin add ./dsh-plugin-android-tools-<version>.tgz`
+安装，或直接 `dsh plugin add github:asdukw/dsh-plugin-android-tools#v<version>`）。
 
-1. 在本仓库 `npm login`（交互式 2FA）后 `npm publish --access public`。
-2. 在 npmjs.com 打开包页面 → Settings → Trusted Publisher → GitHub Actions：
-   organization/user 填 `asdukw`，repository 填 `dsh-plugin-android-tools`，
-   workflow filename 填 `publish.yml`，允许动作选 `npm publish`。
-3. 之后改 `version`、提交、打 `v<version>` tag 并推送；`publish` workflow 经 GitHub
-   OIDC 认证、自动附带 provenance，无需任何 secret。
+npm 发布已备好但默认关闭：先本地发首个版本（`npm login` 后
+`npm publish --access public`），在 npmjs.com 为包添加 trusted publisher
+（package → Settings → Trusted Publisher → GitHub Actions：user `asdukw`、
+repository `dsh-plugin-android-tools`、workflow filename `release.yml`、允许
+`npm publish`），然后启用 workflow 的 npm job：
+
+```bash
+gh variable set NPM_PUBLISH_READY --body true -R asdukw/dsh-plugin-android-tools
+```
 
 ## 许可
 

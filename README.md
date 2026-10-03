@@ -27,8 +27,14 @@ The tools are app-agnostic atomic actions; the model composes them into tasks
 
 ```bash
 dsh plugin add github:asdukw/dsh-plugin-android-tools
-# after the first npm release:
-dsh plugin add dsh-plugin-android-tools
+# pin a release tag:
+dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.1.0
+```
+
+Every GitHub Release attaches an `npm pack` tarball; you can install it directly:
+
+```bash
+dsh plugin add ./dsh-plugin-android-tools-0.1.0.tgz
 ```
 
 The package ships a `dsh.bundle` layer (`cordis.patch.yml`) that inserts the plugin
@@ -94,16 +100,20 @@ No dependencies needed for the smoke test (a loader stub replaces
 npm test
 ```
 
-Release: the first version must be published locally, because npm cannot
-configure a trusted publisher for a package that does not exist yet:
+Release: push a `v*` tag. The `release` workflow runs the tests, packs the package
+and creates a GitHub Release with the `.tgz` attached (install it with
+`dsh plugin add ./dsh-plugin-android-tools-<version>.tgz`, or install the tag directly
+with `dsh plugin add github:asdukw/dsh-plugin-android-tools#v<version>`).
 
-1. `npm login` (interactive 2FA), then `npm publish --access public` from this repo.
-2. On npmjs.com open the package → Settings → Trusted Publisher → GitHub Actions:
-   organization/user `asdukw`, repository `dsh-plugin-android-tools`, workflow
-   filename `publish.yml`, allowed action `npm publish`.
-3. Bump `version`, commit, tag `v<version>`, push the tag. The `publish` workflow
-   then authenticates via GitHub OIDC, attaches provenance automatically and needs
-   no secrets.
+npm publishing is prepared but gated: publish the first version locally
+(`npm login`, then `npm publish --access public`), add a trusted publisher on
+npmjs.com (package → Settings → Trusted Publisher → GitHub Actions: user `asdukw`,
+repository `dsh-plugin-android-tools`, workflow filename `release.yml`, allowed
+action `npm publish`), then enable the workflow's npm job:
+
+```bash
+gh variable set NPM_PUBLISH_READY --body true -R asdukw/dsh-plugin-android-tools
+```
 
 ## License
 
