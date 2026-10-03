@@ -5,12 +5,13 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   npm:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,6 +19,8 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
       - run: npm test
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # OIDC trusted publishing: npm detects the GitHub OIDC token automatically
+      # and attaches provenance. Do not set NODE_AUTH_TOKEN/NPM_TOKEN here, or npm
+      # falls back to token auth. Requires the trusted publisher configuration on
+      # npmjs.com (see README) and a package that already exists on npm.
+      - run: npm publish --access public

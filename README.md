@@ -94,9 +94,16 @@ No dependencies needed for the smoke test (a loader stub replaces
 npm test
 ```
 
-Release: bump `version`, commit, tag `v<version>`, push the tag. The
-`publish` workflow runs the test and publishes to npm with provenance; the repo
-needs an `NPM_TOKEN` secret with publish rights for the package.
+Release: the first version must be published locally, because npm cannot
+configure a trusted publisher for a package that does not exist yet:
+
+1. `npm login` (interactive 2FA), then `npm publish --access public` from this repo.
+2. On npmjs.com open the package → Settings → Trusted Publisher → GitHub Actions:
+   organization/user `asdukw`, repository `dsh-plugin-android-tools`, workflow
+   filename `publish.yml`, allowed action `npm publish`.
+3. Bump `version`, commit, tag `v<version>`, push the tag. The `publish` workflow
+   then authenticates via GitHub OIDC, attaches provenance automatically and needs
+   no secrets.
 
 ## License
 

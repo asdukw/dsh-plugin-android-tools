@@ -87,8 +87,14 @@ body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
 npm test
 ```
 
-发布：改 `version`、提交、打 `v<version>` tag 并推送。`publish` workflow 会先跑测试，
-再带 provenance 发布到 npm；仓库需要一个有发布权限的 `NPM_TOKEN` secret。
+发布：第一个版本需要本地发布 —— npm 不支持为尚不存在的包配置 trusted publisher：
+
+1. 在本仓库 `npm login`（交互式 2FA）后 `npm publish --access public`。
+2. 在 npmjs.com 打开包页面 → Settings → Trusted Publisher → GitHub Actions：
+   organization/user 填 `asdukw`，repository 填 `dsh-plugin-android-tools`，
+   workflow filename 填 `publish.yml`，允许动作选 `npm publish`。
+3. 之后改 `version`、提交、打 `v<version>` tag 并推送；`publish` workflow 经 GitHub
+   OIDC 认证、自动附带 provenance，无需任何 secret。
 
 ## 许可
 
