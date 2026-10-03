@@ -2,11 +2,23 @@
 
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
-[DeepSeek Harness](https://deepseek.com/harness/) (`dsh`) plugin that exposes an Android
-device's accessibility layer as agent tools: read the screen, tap nodes/points, type text,
-press back, launch apps, and swipe — all through a local HTTP bridge.
+[DeepSeek Harness](https://deepseek.com/harness/) (`dsh`) plugin that turns a device UI
+automation bridge into agent tools: read the screen, tap nodes/points, type text, press
+back, launch apps and swipe.
+
+This plugin is a thin, platform-independent HTTP client: it registers the tools and
+forwards each call to a **bridge host** that implements the contract below. Reading the
+UI tree and injecting gestures stays in the host. A reference host runs on Android with
+an `AccessibilityService`, but any system that speaks the contract works with the same
+plugin.
 
 [中文说明](README.zh.md)
+
+## Requirements
+
+- `dsh` running with `@deepseek-ai/dsh-tools` >= `0.1.0-rc.6` (peer dependency).
+- A bridge host reachable over HTTP. Its base URL and token are passed to the plugin
+  through environment variables. Without a host, tool calls fail with a clear error.
 
 ## Tools
 
@@ -20,76 +32,84 @@ press back, launch apps, and swipe — all through a local HTTP bridge.
 | `launch_app(query)` | Launch an app by fuzzy name or package name |
 | `swipe(direction)` | Swipe one screen `up` / `down` / `left` / `right` |
 
-The tools are app-agnostic atomic actions; the model composes them into tasks
-(read first, act, read again to confirm).
+The tools are app-agnostic atomic actions; the model composes them into tasks.
 
 ## Install
 
 ```bash
-dsh plugin add github:asdukw/dsh-plugin-android-tools
-# pin a release tag:
-dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.1.0
+# from git, pinned to a release tag:
+dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.2.0
+
+# or from the tarball attached to any GitHub Release:
+dsh plugin add ./dsh-plugin-android-tools-0.2.0.tgz
+
+# once npm publishing is enabled:
+dsh plugin add dsh-plugin-android-tools
 ```
 
-Every GitHub Release attaches an `npm pack` tarball; you can install it directly:
+The package ships a `dsh.bundle` layer (`cordis.patch.yml`) that inserts the plugin row
+on install. Restart `dsh` afterwards.
 
-```bash
-dsh plugin add ./dsh-plugin-android-tools-0.1.0.tgz
-```
-
-The package ships a `dsh.bundle` layer (`cordis.patch.yml`) that inserts the plugin
-row on install. Restart `dsh` afterwards.
-
-## Configuration
-
-The plugin is a client for an HTTP bridge that lives inside the Android app holding
-the `AccessibilityService`. It reads two environment variables, injected by the host
-app or launcher:
+## Configure
 
 | Variable | Meaning |
 |---|---|
-| `MEMEX_BRIDGE_URL` | Bridge base URL, e.g. `http://127.0.0.1:37812` |
-| `MEMEX_BRIDGE_TOKEN` | Per-process random token |
+| `ANDROID_BRIDGE_URL` | Bridge base URL, e.g. `http://127.0.0.1:37812` |
+| `ANDROID_BRIDGE_TOKEN` | Shared token checked on every request, usually random per host start |
 
-If either is missing, every tool call fails with
-`MEMEX_BRIDGE_URL/TOKEN 未注入`.
+The host app or launcher normally injects both variables; they can also be exported
+manually in the environment that starts `dsh`. If either is missing, every tool call
+fails with `ANDROID_BRIDGE_URL/ANDROID_BRIDGE_TOKEN not set`.
+
+## Usage
+
+The intended loop is **read first, act, read again to confirm**:
+
+```text
+User: open the clock app and set a 5 minute timer
+Agent: launch_app("Clock") → read_screen → tap_node(12) → type_text("5") → …
+```
+
+To try it without a real device, implement the contract below with any HTTP server and
+point `ANDROID_BRIDGE_URL` at it.
 
 ## Bridge contract
 
-Any Android app can host the bridge; this plugin only depends on the contract:
-
 ```
-POST {MEMEX_BRIDGE_URL}/action
-header: x-memex-token: <MEMEX_BRIDGE_TOKEN>
+POST {ANDROID_BRIDGE_URL}/action
+header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
 body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
                     | "press_back" | "launch_app" | "swipe",
           ...action args }
 ```
 
-Success:
+Success: `{ "ok": true, "payload": "…" }` — failure: `{ "ok": false, "summary": "…" }`.
 
-```json
-{ "ok": true, "payload": "…" }
-```
+| Action | Args | Payload |
+|---|---|---|
+| `read_screen` | – | node-tree text, one node per line (`[ref] ClassName "text" [flags] @(x,y)`) |
+| `tap_node` | `ref` (integer) | result summary |
+| `tap_point` | `x`, `y` (integers) | result summary |
+| `type_text` | `text` (string) | result summary |
+| `press_back` | – | result summary |
+| `launch_app` | `query` (string) | result summary |
+| `swipe` | `direction` (`up` / `down` / `left` / `right`) | result summary |
 
-Failure:
+Keep the bridge local (e.g. loopback) and token-checked: screen content can be personal
+data, and the bridge can drive the device. Payloads are only returned to the model; do
+not log them.
 
-```json
-{ "ok": false, "summary": "…" }
-```
+## Platform notes
 
-Action args: `tap_node` → `ref` (int); `tap_point` → `x`, `y` (int);
-`type_text` → `text` (string); `launch_app` → `query` (string);
-`swipe` → `direction` (`up|down|left|right`); `read_screen`, `press_back` → none.
-
-Security properties of the reference bridge: it binds `127.0.0.1` only and
-authenticates every request with a per-process random token; it exposes nothing
-else. Payloads can contain screen text, so do not log tool results.
+- The plugin contains no OS-specific code — it only speaks HTTP. Porting to another
+  platform means writing a bridge host, not changing the plugin.
+- ROM/OEM behaviour (accessibility permissions, gesture injection quirks, node-tree
+  differences) belongs behind the bridge, so the tool surface stays stable.
 
 ## Chat helpers
 
-Chat-page context tracking (`collect_chat` / `read_chat` / `wait`) lives in a
-separate plugin: [dsh-plugin-chat-tools](https://github.com/asdukw/dsh-plugin-chat-tools).
+Chat-page context tracking (`collect_chat` / `read_chat` / `wait`) lives in a separate
+plugin: [dsh-plugin-chat-tools](https://github.com/asdukw/dsh-plugin-chat-tools).
 
 ## Development
 
@@ -100,16 +120,12 @@ No dependencies needed for the smoke test (a loader stub replaces
 npm test
 ```
 
-Release: push a `v*` tag. The `release` workflow runs the tests, packs the package
-and creates a GitHub Release with the `.tgz` attached (install it with
-`dsh plugin add ./dsh-plugin-android-tools-<version>.tgz`, or install the tag directly
-with `dsh plugin add github:asdukw/dsh-plugin-android-tools#v<version>`).
-
-npm publishing is prepared but gated: publish the first version locally
-(`npm login`, then `npm publish --access public`), add a trusted publisher on
-npmjs.com (package → Settings → Trusted Publisher → GitHub Actions: user `asdukw`,
-repository `dsh-plugin-android-tools`, workflow filename `release.yml`, allowed
-action `npm publish`), then enable the workflow's npm job:
+Release: push a `v*` tag. The `release` workflow runs the tests, packs the package and
+creates a GitHub Release with the `.tgz` attached. npm publishing is prepared as a
+gated job: publish the first version locally (`npm login`, then `npm publish --access
+public`), add a trusted publisher on npmjs.com (package → Settings → Trusted Publisher
+→ GitHub Actions: user `asdukw`, repository `dsh-plugin-android-tools`, workflow
+filename `release.yml`, allowed action `npm publish`), then enable the job:
 
 ```bash
 gh variable set NPM_PUBLISH_READY --body true -R asdukw/dsh-plugin-android-tools

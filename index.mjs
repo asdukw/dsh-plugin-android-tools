@@ -1,25 +1,24 @@
-// dsh 设备插件：把 Android 无障碍执行层的原子动作注册成 dsh 工具。
+// dsh plugin: expose a device UI automation bridge as agent tools.
 //
-// 通道：POST http://127.0.0.1:<port>/action（Kotlin 侧 DeviceBridgeServer，
-// token 来自启动时注入的环境变量）。工具是 App 无关的原子操作，具体任务由模型组合；
-// 聊天页的上下文辅助在 dsh-plugin-chat-tools，本插件只保留核心设备动作。
+// Transport: POST {ANDROID_BRIDGE_URL}/action with an x-android-bridge-token
+// header. The tools are app-agnostic atomic actions composed by the model;
+// chat-page helpers live in dsh-plugin-chat-tools.
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'dsh-android-tools'
 export const inject = ['tools']
 
-const baseUrl = process.env.MEMEX_BRIDGE_URL
-const token = process.env.MEMEX_BRIDGE_TOKEN
-
 async function call(action, args = {}) {
-  if (!baseUrl || !token) throw new Error('MEMEX_BRIDGE_URL/TOKEN 未注入')
+  const baseUrl = process.env.ANDROID_BRIDGE_URL
+  const token = process.env.ANDROID_BRIDGE_TOKEN
+  if (!baseUrl || !token) throw new Error('ANDROID_BRIDGE_URL/ANDROID_BRIDGE_TOKEN not set')
   const response = await fetch(`${baseUrl}/action`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-memex-token': token },
+    headers: { 'content-type': 'application/json', 'x-android-bridge-token': token },
     body: JSON.stringify({ action, ...args }),
   })
   const body = await response.json()
-  if (body.ok !== true) throw new Error(body.summary ?? `设备动作失败：${action}`)
+  if (body.ok !== true) throw new Error(body.summary ?? `device action failed: ${action}`)
   return body.payload ?? body.summary ?? 'ok'
 }
 
