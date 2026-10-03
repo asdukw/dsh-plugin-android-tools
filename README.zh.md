@@ -14,8 +14,9 @@ agent 工具 —— 读屏、点节点/坐标、输入文本、返回、启动�
 ## 前置条件
 
 - 运行中的 `dsh`，带 `@deepseek-ai/dsh-tools` >= `0.1.0-rc.6`（peer dependency）。
-- 一个可通过 HTTP 访问的桥宿主；其 base URL 与 token 通过环境变量传给插件。
-  没有宿主时，工具调用会以明确错误失败。
+- **一个桥宿主**：本仓库只发布客户端这一半，宿主不在这里发布。可以对接已有宿主，
+  或按下方契约实现（见[编写宿主](#编写宿主)）；仓库内附带一个可运行的 mock 宿主
+  用于测试。没有宿主时，工具调用会以明确错误失败。
 
 ## 工具
 
@@ -65,7 +66,15 @@ User: 打开时钟应用，设置一个 5 分钟计时器
 Agent: launch_app("Clock") → read_screen → tap_node(12) → type_text("5") → …
 ```
 
-想在没有真机的情况下试跑：用任意 HTTP 服务实现下方契约，把 `ANDROID_BRIDGE_URL` 指向它即可。
+想在没有真机的情况下试跑，用仓库自带的 mock 宿主（固定屏幕、无需设备）：
+
+```bash
+node examples/mock-host.mjs   # mock host on http://127.0.0.1:37812 (token: dev-token)
+export ANDROID_BRIDGE_URL=http://127.0.0.1:37812
+export ANDROID_BRIDGE_TOKEN=dev-token
+```
+
+mock 会确认所有动作，并为 `read_screen` 返回一份固定控件树。
 
 ## 桥契约
 
@@ -91,6 +100,28 @@ body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
 
 桥应只监听本地（如 loopback）并校验 token：读屏内容可能包含个人数据，桥还能驱动设备。
 payload 只交给模型，不要写日志。
+
+## 编写宿主
+
+宿主就是任何能读 UI、注入输入的进程；上方契约就是全部接口：
+
+| 宿主所在平台 | 典型构件 |
+|---|---|
+| Android | `AccessibilityService`（`getRootInActiveWindow`、`dispatchGesture`、`ACTION_SET_TEXT` 等） |
+| Windows | UI Automation |
+| macOS | Accessibility API（`AXUIElement`） |
+| iOS | WebDriverAgent / XCTest |
+| 其他 | 任何能产出 `read_screen` 文本并接受点击的系统 |
+
+检查清单：
+
+- 只监听 loopback（或做强鉴权），每个请求校验 `x-android-bridge-token`；
+- 把 `action` + 参数映射到平台原语，返回 `{ok, payload}` 或 `{ok, summary}`；
+- `read_screen` 按文档格式一行一个有效节点 —— 模型依赖 `[ref]` 在下一次读屏前保持
+  稳定，`tap_node` 才能点中；
+- ROM/OEM 怪癖都留在宿主里，工具接口保持不变。
+
+`examples/mock-host.mjs` 是约 60 行的参考实现（解析/鉴权/回包形状）。
 
 ## 平台说明
 

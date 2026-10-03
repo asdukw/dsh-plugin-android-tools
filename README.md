@@ -17,8 +17,10 @@ plugin.
 ## Requirements
 
 - `dsh` running with `@deepseek-ai/dsh-tools` >= `0.1.0-rc.6` (peer dependency).
-- A bridge host reachable over HTTP. Its base URL and token are passed to the plugin
-  through environment variables. Without a host, tool calls fail with a clear error.
+- **A bridge host**: this repository ships the client half only — no host is published
+  here. Point the plugin at an existing host, or implement the small contract below
+  (see [Writing a host](#writing-a-host)); a runnable mock host is included for
+  testing. Without a host, tool calls fail with a clear error.
 
 ## Tools
 
@@ -70,8 +72,16 @@ User: open the clock app and set a 5 minute timer
 Agent: launch_app("Clock") → read_screen → tap_node(12) → type_text("5") → …
 ```
 
-To try it without a real device, implement the contract below with any HTTP server and
-point `ANDROID_BRIDGE_URL` at it.
+To try the plugin without a device, run the bundled mock host (canned screen, no
+device needed):
+
+```bash
+node examples/mock-host.mjs   # mock host on http://127.0.0.1:37812 (token: dev-token)
+export ANDROID_BRIDGE_URL=http://127.0.0.1:37812
+export ANDROID_BRIDGE_TOKEN=dev-token
+```
+
+The mock acknowledges every action and returns a canned `read_screen`.
 
 ## Bridge contract
 
@@ -98,6 +108,31 @@ Success: `{ "ok": true, "payload": "…" }` — failure: `{ "ok": false, "summar
 Keep the bridge local (e.g. loopback) and token-checked: screen content can be personal
 data, and the bridge can drive the device. Payloads are only returned to the model; do
 not log them.
+
+## Writing a host
+
+A host is any process that can read the UI and inject input. The contract above is the
+entire interface:
+
+| Where the host runs | Typical building blocks |
+|---|---|
+| Android | `AccessibilityService` (`getRootInActiveWindow`, `dispatchGesture`, `ACTION_SET_TEXT`, …) |
+| Windows | UI Automation |
+| macOS | Accessibility API (`AXUIElement`) |
+| iOS | WebDriverAgent / XCTest |
+| Anything else | whatever can produce `read_screen` text and accept taps |
+
+Checklist:
+
+- listen on loopback (or authenticate hard) and verify `x-android-bridge-token` on
+  every request;
+- map `action` + args to the platform primitives and return `{ok, payload}` or
+  `{ok, summary}`;
+- `read_screen` must emit one line per interesting node in the documented format — the
+  model relies on `[ref]` staying stable until the next read so `tap_node` works;
+- keep ROM/OEM quirks inside the host so the tool surface never changes.
+
+`examples/mock-host.mjs` is a ~60-line reference for the parsing/auth/reply shape.
 
 ## Platform notes
 
