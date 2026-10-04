@@ -2,7 +2,7 @@
 //
 // Transport: POST {ANDROID_BRIDGE_URL}/action with an x-android-bridge-token
 // header. The tools are app-agnostic atomic actions composed by the model;
-// chat-page helpers live in dsh-plugin-chat-tools.
+// chat/business semantics stay in the caller; this plugin only exposes generic primitives.
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'dsh-android-tools'
@@ -82,10 +82,34 @@ export function apply(ctx) {
   )
   ctx.tools.register(
     deviceTool({
-      name: 'press_back',
-      action: 'press_back',
-      description: '按系统返回键，用于退出当前页面或取消弹窗。',
-      parameters: {},
+      name: 'long_press',
+      action: 'long_press',
+      description:
+        '长按 read_screen 输出里的节点 [ref]，或长按坐标 (x,y)；优先用 ref。'
+        + '长按时间默认 700ms（可选 300–2000ms）。长按后要再读屏确认菜单/选择状态。',
+      parameters: {
+        ref: { type: 'integer', description: 'read_screen 输出行首的节点编号（优先）' },
+        x: { type: 'integer', description: '没有 ref 时的横坐标像素' },
+        y: { type: 'integer', description: '没有 ref 时的纵坐标像素' },
+        duration_ms: { type: 'integer', description: '长按毫秒数（300–2000，默认 700）' },
+      },
+    }),
+  )
+  ctx.tools.register(
+    deviceTool({
+      name: 'press',
+      action: 'press',
+      description:
+        '按系统键：back=返回/收键盘/取消；home=回桌面；recents=最近任务；enter=触发当前输入框的发送或搜索。'
+        + 'Android 没有独立 Esc，取消或退出用 back。',
+      parameters: {
+        key: {
+          type: 'string',
+          required: true,
+          enum: ['back', 'home', 'recents', 'enter'],
+          description: '要按的系统键',
+        },
+      },
     }),
   )
   ctx.tools.register(
@@ -110,6 +134,25 @@ export function apply(ctx) {
           enum: ['up', 'down', 'left', 'right'],
           description: '滑动方向：up=内容上滚（手指上滑），down=内容下滚，left/right 同理',
         },
+      },
+    }),
+  )
+  ctx.tools.register(
+    defineTool({
+      name: 'wait',
+      description:
+        '等待 10–120 秒再继续，用于页面加载或网络响应。等待后要再 read_screen 确认状态；不要把它当拖延手段。',
+      parameters: {
+        seconds: { type: 'integer', required: true, description: '等待秒数（10–120）' },
+      },
+      output: {
+        schema: { type: 'string' },
+        render: (_args, value) => [{ type: 'text', text: value }],
+      },
+      async execute(args) {
+        const seconds = Math.min(120, Math.max(10, args.seconds))
+        await new Promise((resolve) => setTimeout(resolve, seconds * 1000))
+        return `waited ${seconds}s`
       },
     }),
   )

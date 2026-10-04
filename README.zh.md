@@ -3,7 +3,7 @@
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
 [DeepSeek Harness](https://deepseek.com/harness/)（`dsh`）插件：把设备 UI 自动化桥变成
-agent 工具 —— 读屏、点节点/坐标、输入文本、返回、启动应用、滑动。
+agent 工具 —— 读屏、点按、长按、输入、系统键、启动应用、滑动、等待。
 
 插件本身是一个**平台无关**的薄 HTTP 客户端：它只注册工具并把调用转发给实现下方契约的
 **桥宿主**；读控件树、注入手势等设备相关工作都在宿主里。参考宿主运行在 Android 上
@@ -25,10 +25,12 @@ agent 工具 —— 读屏、点节点/坐标、输入文本、返回、启动�
 | `read_screen` | 读取当前屏幕控件树，输出形如 `[12] TextView "发送" clickable @(900,2200)` 的行 |
 | `tap_node(ref)` | 点击上次 `read_screen` 输出里的节点 |
 | `tap_point(x,y)` | 按屏幕坐标点击（极少需要） |
+| `long_press(ref\|x,y,duration_ms?)` | 长按节点或坐标（默认 700ms，可选 300–2000ms） |
 | `type_text(text)` | 把文本写进当前聚焦输入框；只输入不发送 |
-| `press_back` | 系统返回键 |
+| `press(key)` | 按 `back` / `home` / `recents` / `enter`；取消/退出用 `back` 代替 Esc |
 | `launch_app(query)` | 按应用名（模糊）或包名启动 |
 | `swipe(direction)` | 向 `up` / `down` / `left` / `right` 滑动一屏 |
+| `wait(seconds)` | 客户端等待 10–120 秒，不调用桥 |
 
 工具是与具体 App 无关的原子动作，由模型组合成任务。
 
@@ -36,10 +38,10 @@ agent 工具 —— 读屏、点节点/坐标、输入文本、返回、启动�
 
 ```bash
 # 从 git 安装，锁定 release tag：
-dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.2.0
+dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.3.0
 
 # 或安装任意 GitHub Release 附带的 tarball：
-dsh plugin add ./dsh-plugin-android-tools-0.2.0.tgz
+dsh plugin add ./dsh-plugin-android-tools-0.3.0.tgz
 
 # npm 发布启用后也可以：
 dsh plugin add dsh-plugin-android-tools
@@ -81,9 +83,10 @@ mock 会确认所有动作，并为 `read_screen` 返回一份固定控件树。
 ```
 POST {ANDROID_BRIDGE_URL}/action
 header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
-body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
-                    | "press_back" | "launch_app" | "swipe",
+body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
+                    | "type_text" | "press" | "launch_app" | "swipe",
           ...动作参数 }
+说明：`wait` 是客户端等待，不调用桥。
 ```
 
 成功：`{ "ok": true, "payload": "…" }`；失败：`{ "ok": false, "summary": "…" }`。
@@ -93,11 +96,13 @@ body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
 | `read_screen` | – | 控件树文本，一行一个节点（`[ref] 类名 "文本" [flags] @(x,y)`） |
 | `tap_node` | `ref`（整数） | 结果摘要 |
 | `tap_point` | `x`、`y`（整数） | 结果摘要 |
+| `long_press` | `ref`，或 `x` + `y`，可选 `duration_ms` | 结果摘要 |
 | `type_text` | `text`（字符串） | 结果摘要 |
-| `press_back` | – | 结果摘要 |
+| `press` | `key`（`back` / `home` / `recents` / `enter`） | 结果摘要 |
 | `launch_app` | `query`（字符串） | 结果摘要 |
 | `swipe` | `direction`（`up` / `down` / `left` / `right`） | 结果摘要 |
 
+Android 宿主仍接受 `press_back` 作为 `press(back)` 的兼容别名，但插件不再把它注册成模型工具。
 桥应只监听本地（如 loopback）并校验 token：读屏内容可能包含个人数据，桥还能驱动设备。
 payload 只交给模型，不要写日志。
 
@@ -129,10 +134,10 @@ payload 只交给模型，不要写日志。
   插件本身不用改。
 - ROM/OEM 差异（无障碍权限、手势注入怪癖、控件树差异）都放在桥后面，工具接口保持稳定。
 
-## 聊天辅助
+## 通用边界
 
-聊天页上下文跟踪（`collect_chat` / `read_chat` / `wait`）在独立插件：
-[dsh-plugin-chat-tools](https://github.com/asdukw/dsh-plugin-chat-tools)。
+本插件只暴露与 App 无关的基础原语。聊天、购物、设置等业务语义由模型组合完成，
+不在插件里内置页面专用工具。
 
 ## 开发
 

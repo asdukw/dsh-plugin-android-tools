@@ -14,12 +14,14 @@ plugin.apply({ tools: { register: (tool) => registered.push(tool) } })
 const names = registered.map((tool) => tool.name).sort()
 assert.deepEqual(names, [
   'launch_app',
-  'press_back',
+  'long_press',
+  'press',
   'read_screen',
   'swipe',
   'tap_node',
   'tap_point',
   'type_text',
+  'wait',
 ])
 
 for (const tool of registered) {
