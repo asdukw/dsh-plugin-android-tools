@@ -137,23 +137,4 @@ export function apply(ctx) {
       },
     }),
   )
-  ctx.tools.register(
-    defineTool({
-      name: 'wait',
-      description:
-        '等待 10–120 秒再继续，用于页面加载或网络响应。等待后要再 read_screen 确认状态；不要把它当拖延手段。',
-      parameters: {
-        seconds: { type: 'integer', required: true, description: '等待秒数（10–120）' },
-      },
-      output: {
-        schema: { type: 'string' },
-        render: (_args, value) => [{ type: 'text', text: value }],
-      },
-      async execute(args) {
-        const seconds = Math.min(120, Math.max(10, args.seconds))
-        await new Promise((resolve) => setTimeout(resolve, seconds * 1000))
-        return `waited ${seconds}s`
-      },
-    }),
-  )
 }

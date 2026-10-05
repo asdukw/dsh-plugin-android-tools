@@ -4,7 +4,7 @@
 
 [DeepSeek Harness](https://deepseek.com/harness/) (`dsh`) plugin that turns a device UI
 automation bridge into agent tools: read the screen, tap nodes/points, long press,
-type text, press system keys, launch apps, swipe and wait.
+type text, press system keys, launch apps and swipe.
 
 This plugin is a thin, platform-independent HTTP client: it registers the tools and
 forwards each call to a **bridge host** that implements the contract below. Reading the
@@ -34,7 +34,6 @@ plugin.
 | `press(key)` | Press `back` / `home` / `recents` / `enter`; use `back` for Esc-like cancel/exit |
 | `launch_app(query)` | Launch an app by fuzzy name or package name |
 | `swipe(direction)` | Swipe one screen `up` / `down` / `left` / `right` |
-| `wait(seconds)` | Client-side wait (10-120 s), no bridge call |
 
 The tools are app-agnostic atomic actions; the model composes them into tasks.
 
@@ -93,7 +92,6 @@ header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
 body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
                     | "type_text" | "press" | "launch_app" | "swipe",
           ...action args }
-note:   "wait" is client-side and does not call the bridge.
 ```
 
 Success: `{ "ok": true, "payload": "…" }` — failure: `{ "ok": false, "summary": "…" }`.

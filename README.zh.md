@@ -3,7 +3,7 @@
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
 [DeepSeek Harness](https://deepseek.com/harness/)（`dsh`）插件：把设备 UI 自动化桥变成
-agent 工具 —— 读屏、点按、长按、输入、系统键、启动应用、滑动、等待。
+agent 工具 —— 读屏、点按、长按、输入、系统键、启动应用、滑动。
 
 插件本身是一个**平台无关**的薄 HTTP 客户端：它只注册工具并把调用转发给实现下方契约的
 **桥宿主**；读控件树、注入手势等设备相关工作都在宿主里。参考宿主运行在 Android 上
@@ -30,7 +30,6 @@ agent 工具 —— 读屏、点按、长按、输入、系统键、启动应用
 | `press(key)` | 按 `back` / `home` / `recents` / `enter`；取消/退出用 `back` 代替 Esc |
 | `launch_app(query)` | 按应用名（模糊）或包名启动 |
 | `swipe(direction)` | 向 `up` / `down` / `left` / `right` 滑动一屏 |
-| `wait(seconds)` | 客户端等待 10–120 秒，不调用桥 |
 
 工具是与具体 App 无关的原子动作，由模型组合成任务。
 
@@ -86,7 +85,6 @@ header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
 body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
                     | "type_text" | "press" | "launch_app" | "swipe",
           ...动作参数 }
-说明：`wait` 是客户端等待，不调用桥。
 ```
 
 成功：`{ "ok": true, "payload": "…" }`；失败：`{ "ok": false, "summary": "…" }`。

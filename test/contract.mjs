@@ -22,14 +22,6 @@ assert.equal(
 )
 assert.equal(await tools.get('type_text').execute({ text: 'hi' }), 'mock host acknowledged type_text')
 
-const realSetTimeout = globalThis.setTimeout
-globalThis.setTimeout = (callback) => {
-  callback()
-  return 0
-}
-assert.equal(await tools.get('wait').execute({ seconds: 10 }), 'waited 10s')
-globalThis.setTimeout = realSetTimeout
-
 process.env.ANDROID_BRIDGE_TOKEN = 'wrong'
 await assert.rejects(() => tools.get('press').execute({ key: 'back' }), /unauthorized/)
 

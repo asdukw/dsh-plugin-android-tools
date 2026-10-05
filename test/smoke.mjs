@@ -21,7 +21,6 @@ assert.deepEqual(names, [
   'tap_node',
   'tap_point',
   'type_text',
-  'wait',
 ])
 
 for (const tool of registered) {
