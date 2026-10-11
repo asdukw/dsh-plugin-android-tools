@@ -1,7 +1,7 @@
 {
   "name": "dsh-plugin-android-tools",
-  "version": "0.2.0",
-  "description": "Android device automation tools for DeepSeek Harness (dsh): read screen, tap, type, back, launch app, swipe over a local HTTP bridge",
+  "version": "0.3.0",
+  "description": "Android device automation tools for DeepSeek Harness (dsh): read, tap, long press, type, system keys, launch and swipe over a local HTTP bridge",
   "type": "module",
   "main": "index.mjs",
   "exports": {
@@ -41,6 +41,6 @@
     }
   },
   "scripts": {
-    "test": "node test/smoke.mjs && node test/contract.mjs"
+    "test": "node test/smoke.mjs && node test/contract.mjs && node test/real-schema.mjs"
   }
 }

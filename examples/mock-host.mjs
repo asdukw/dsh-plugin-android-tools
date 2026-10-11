@@ -1,6 +1,7 @@
 // Minimal bridge host mock: speaks the documented contract so you can try
 // dsh-plugin-android-tools without a real device. It is NOT an automation host —
-// read_screen returns a canned screen and every other action is acknowledged.
+// read_screen returns a canned screen, screenshot returns a real 2x2 PNG, and
+// every other action is acknowledged.
 //
 // Run:  node examples/mock-host.mjs
 // Then: ANDROID_BRIDGE_URL=http://127.0.0.1:37812 ANDROID_BRIDGE_TOKEN=dev-token
@@ -12,6 +13,19 @@ export const MOCK_SCREEN = [
   '[1] TextView "Hello from the mock host" @(540,300)',
   '[2] Button "OK" clickable @(540,900)',
 ].join('\n')
+
+/**
+ * The `screenshot` action's documented payload: a JSON string carrying the encoded
+ * image. This mock answers with a real 2x2 PNG so the image path is exercisable
+ * without a device.
+ */
+export const MOCK_SCREENSHOT = JSON.stringify({
+  mediaType: 'image/png',
+  width: 2,
+  height: 2,
+  base64:
+    'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP8z8DAwMDAxMDAwMAAAA0BAQDJ/pLvAAAAAElFTkSuQmCC',
+})
 
 export function startMockHost({ port = 0, token = 'dev-token' } = {}) {
   const server = createServer((request, response) => {
@@ -38,6 +52,7 @@ export function startMockHost({ port = 0, token = 'dev-token' } = {}) {
         return
       }
       if (action === 'read_screen') reply({ ok: true, payload: MOCK_SCREEN })
+      else if (action === 'screenshot') reply({ ok: true, summary: '截图 2x2 png 0KB', payload: MOCK_SCREENSHOT })
       else if (action) reply({ ok: true, payload: `mock host acknowledged ${action}` })
       else reply({ ok: false, summary: 'missing action' })
     })

@@ -2,13 +2,14 @@
 //
 // Transport: POST {ANDROID_BRIDGE_URL}/action with an x-android-bridge-token
 // header. The tools are app-agnostic atomic actions composed by the model;
-// chat-page helpers live in dsh-plugin-chat-tools.
+// chat/business semantics stay in the caller; this plugin only exposes generic primitives.
 import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'dsh-android-tools'
 export const inject = ['tools']
 
-async function call(action, args = {}) {
+/** 调桥并返回整个响应体（截图要拿 summary 之外的 payload）。 */
+async function callResult(action, args = {}) {
   const baseUrl = process.env.ANDROID_BRIDGE_URL
   const token = process.env.ANDROID_BRIDGE_TOKEN
   if (!baseUrl || !token) throw new Error('ANDROID_BRIDGE_URL/ANDROID_BRIDGE_TOKEN not set')
@@ -19,7 +20,25 @@ async function call(action, args = {}) {
   })
   const body = await response.json()
   if (body.ok !== true) throw new Error(body.summary ?? `device action failed: ${action}`)
+  return body
+}
+
+async function call(action, args = {}) {
+  const body = await callResult(action, args)
   return body.payload ?? body.summary ?? 'ok'
+}
+
+/** 解析截图动作的 payload；不是契约形状就回 undefined。 */
+function parseShot(payload) {
+  if (typeof payload !== 'string') return undefined
+  let parsed
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed?.base64 !== 'string' || typeof parsed?.mediaType !== 'string') return undefined
+  return parsed
 }
 
 function deviceTool(options) {
@@ -44,7 +63,11 @@ export function apply(ctx) {
       action: 'read_screen',
       description:
         '读取当前手机屏幕的控件树，返回形如 "[12] TextView \\"发送\\" clickable @(900,2200)" 的行；'
-        + '行首 [n] 是节点编号，用 tap_node 点击它。操作前先读屏，操作后再读一次确认结果。',
+        + '行首 [n] 是节点编号，用 tap_node 点击它。操作前先读屏，操作后再读一次确认结果。'
+        + '若只返回 0-1 个节点，说明该 App 对无障碍隐藏了控件树（实测微信 8.0.78 只在'
+        + '「触摸探索」开启后启动的进程里暴露节点）：这时停下手上的操作，不要盲点，'
+        + '把情况告诉用户，请他在系统设置 → 应用管理里对该 App 点「强行停止」，'
+        + '然后再重新发起任务。',
       parameters: {},
     }),
   )
@@ -82,10 +105,75 @@ export function apply(ctx) {
   )
   ctx.tools.register(
     deviceTool({
-      name: 'press_back',
-      action: 'press_back',
-      description: '按系统返回键，用于退出当前页面或取消弹窗。',
+      name: 'long_press',
+      action: 'long_press',
+      description:
+        '长按 read_screen 输出里的节点 [ref]，或长按坐标 (x,y)；优先用 ref。'
+        + '长按时间默认 700ms（可选 300–2000ms）。长按后要再读屏确认菜单/选择状态。',
+      parameters: {
+        ref: { type: 'integer', description: 'read_screen 输出行首的节点编号（优先）' },
+        x: { type: 'integer', description: '没有 ref 时的横坐标像素' },
+        y: { type: 'integer', description: '没有 ref 时的纵坐标像素' },
+        duration_ms: { type: 'integer', description: '长按毫秒数（300–2000，默认 700）' },
+      },
+    }),
+  )
+  ctx.tools.register(
+    defineTool({
+      name: 'screenshot',
+      description:
+        '截取当前屏幕并把图像交给模型（PNG/JPEG）。读屏拿不到控件树、或要看图标/图片/布局细节时用它；'
+        + '拿到图后用 tap_point 按坐标操作（tap_node 要的是 read_screen 的节点编号）。'
+        + '优先 read_screen —— 图会占请求预算，只在读屏给不出信息时才截。',
       parameters: {},
+      output: {
+        // dsh 的 value schema DSL 要求对象根显式写死 additionalProperties 的开闭，
+        // 漏了会直接抛错 —— 而 defineTool 抛错会让整个插件的工具都注册不上。
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args, value) => {
+          const blocks = [{ type: 'text', text: value.summary }]
+          if (value.attachment) blocks.push({ type: 'image', attachment: value.attachment })
+          return blocks
+        },
+      },
+      async execute() {
+        const body = await callResult('screenshot')
+        const summary = body.summary ?? '已截图'
+        // 宿主没按契约回 { mediaType, width, height, base64 } 时退回纯文字：
+        // 能截屏但交不了图的宿主（如 mock）不该让这个工具直接抛错。
+        const shot = parseShot(body.payload)
+        if (!shot) {
+          return { summary: `${summary}（宿主未返回图像数据，没能交给模型）` }
+        }
+        // 附件服务由运行时挂载（dsh-android-attachments）；没有它就只能退回文字。
+        const attachments = typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+        if (!attachments) {
+          return { summary: `${summary}（运行时未挂载附件服务，图像没能交给模型）` }
+        }
+        const attachment = await attachments.saveImage({
+          data: Buffer.from(shot.base64, 'base64'),
+          mediaType: shot.mediaType,
+          name: `screenshot-${shot.width}x${shot.height}`,
+        })
+        return { summary, attachment }
+      },
+    }),
+  )
+  ctx.tools.register(
+    deviceTool({
+      name: 'press',
+      action: 'press',
+      description:
+        '按系统键：back=返回/收键盘/取消；home=回桌面；recents=最近任务；enter=触发当前输入框的发送或搜索。'
+        + 'Android 没有独立 Esc，取消或退出用 back。',
+      parameters: {
+        key: {
+          type: 'string',
+          required: true,
+          enum: ['back', 'home', 'recents', 'enter'],
+          description: '要按的系统键',
+        },
+      },
     }),
   )
   ctx.tools.register(

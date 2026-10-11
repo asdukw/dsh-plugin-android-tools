@@ -3,8 +3,8 @@
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
 [DeepSeek Harness](https://deepseek.com/harness/) (`dsh`) plugin that turns a device UI
-automation bridge into agent tools: read the screen, tap nodes/points, type text, press
-back, launch apps and swipe.
+automation bridge into agent tools: read the screen, take screenshots, tap nodes/points,
+long press, type text, press system keys, launch apps and swipe.
 
 This plugin is a thin, platform-independent HTTP client: it registers the tools and
 forwards each call to a **bridge host** that implements the contract below. Reading the
@@ -29,10 +29,18 @@ plugin.
 | `read_screen` | Dump the current screen's node tree as lines like `[12] TextView "Send" clickable @(900,2200)` |
 | `tap_node(ref)` | Tap a node from the last `read_screen` |
 | `tap_point(x,y)` | Tap raw screen coordinates (rarely needed) |
+| `long_press(ref\|x,y,duration_ms?)` | Long-press a node or point (default 700 ms, 300-2000 ms) |
 | `type_text(text)` | Write text into the focused input; does not send |
-| `press_back` | System back |
+| `press(key)` | Press `back` / `home` / `recents` / `enter`; use `back` for Esc-like cancel/exit |
 | `launch_app(query)` | Launch an app by fuzzy name or package name |
 | `swipe(direction)` | Swipe one screen `up` / `down` / `left` / `right` |
+| `screenshot()` | Capture the screen and hand the **image** to the model; for apps that expose no node tree, or when icons/images/layout matter |
+
+A `screenshot` image only reaches the model through the **attachment service**
+(`ctx.attachments`): the tool persists the bytes and returns an image content block. Without a
+mounted attachment service it degrades to text (the call still succeeds, the image does not reach
+the model) instead of failing. A bridge host just returns
+`{ mediaType, width, height, base64 }` as the action `payload`.
 
 The tools are app-agnostic atomic actions; the model composes them into tasks.
 
@@ -40,10 +48,10 @@ The tools are app-agnostic atomic actions; the model composes them into tasks.
 
 ```bash
 # from git, pinned to a release tag:
-dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.2.0
+dsh plugin add github:asdukw/dsh-plugin-android-tools#v0.3.0
 
 # or from the tarball attached to any GitHub Release:
-dsh plugin add ./dsh-plugin-android-tools-0.2.0.tgz
+dsh plugin add ./dsh-plugin-android-tools-0.3.0.tgz
 
 # once npm publishing is enabled:
 dsh plugin add dsh-plugin-android-tools
@@ -88,8 +96,8 @@ The mock acknowledges every action and returns a canned `read_screen`.
 ```
 POST {ANDROID_BRIDGE_URL}/action
 header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
-body:   { "action": "read_screen" | "tap_node" | "tap_point" | "type_text"
-                    | "press_back" | "launch_app" | "swipe",
+body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
+                    | "type_text" | "press" | "launch_app" | "swipe" | "screenshot",
           ...action args }
 ```
 
@@ -100,14 +108,17 @@ Success: `{ "ok": true, "payload": "…" }` — failure: `{ "ok": false, "summar
 | `read_screen` | – | node-tree text, one node per line (`[ref] ClassName "text" [flags] @(x,y)`) |
 | `tap_node` | `ref` (integer) | result summary |
 | `tap_point` | `x`, `y` (integers) | result summary |
+| `long_press` | `ref`, or `x` + `y`, plus optional `duration_ms` | result summary |
 | `type_text` | `text` (string) | result summary |
-| `press_back` | – | result summary |
+| `press` | `key` (`back` / `home` / `recents` / `enter`) | result summary |
 | `launch_app` | `query` (string) | result summary |
 | `swipe` | `direction` (`up` / `down` / `left` / `right`) | result summary |
+| `screenshot` | – | JSON string `{ "mediaType", "width", "height", "base64" }` |
 
-Keep the bridge local (e.g. loopback) and token-checked: screen content can be personal
-data, and the bridge can drive the device. Payloads are only returned to the model; do
-not log them.
+`press_back` remains an optional legacy bridge alias for `press(back)`, but it is not
+registered as a model tool. Keep the bridge local (e.g. loopback) and token-checked:
+screen content can be personal data, and the bridge can drive the device. Payloads are
+only returned to the model; do not log them.
 
 ## Writing a host
 
@@ -141,10 +152,10 @@ Checklist:
 - ROM/OEM behaviour (accessibility permissions, gesture injection quirks, node-tree
   differences) belongs behind the bridge, so the tool surface stays stable.
 
-## Chat helpers
+## Generic boundary
 
-Chat-page context tracking (`collect_chat` / `read_chat` / `wait`) lives in a separate
-plugin: [dsh-plugin-chat-tools](https://github.com/asdukw/dsh-plugin-chat-tools).
+This plugin intentionally exposes only app-agnostic primitives. Chat, shopping, settings
+and other business flows are composed by the model; no page-specific tool is built in.
 
 ## Development
 
