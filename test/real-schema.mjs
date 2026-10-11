@@ -5,18 +5,36 @@
 // additionalProperties），defineTool 一抛错，**整个插件注册的工具都会没了** ——
 // 实测踩过一次：模型侧看到 0 个工具，只能对着 persona 猜工具名。
 //
-// 为了让「测的永远是当前源码」，这里自建一个沙箱：把源码拷进去，再用 junction
-// 把运行时的 @deepseek-ai/* 接进去（依赖要能解析到缓存，先跑 tools/bundle-dsh.ps1）。
+// 为了让「测的永远是当前源码」，这里自建一个沙箱：把源码拷进去，再把真实的
+// @deepseek-ai/* 接进去。
+//
+// 真实的 dsh-tools 从两处找：本仓库的 node_modules（装了 peerDependency 的话），
+// 或 memex 里的运行时缓存（android/.dsh-cache/runtime，先跑 tools/bundle-dsh.ps1）。
+// 两处都没有就**跳过**并说明原因 —— 这个仓库刻意保持零依赖，CI 里没有 dsh 运行时，
+// 不该因为跑不了这条检查而变红；校验在有运行时的环境（memex 本地）照常生效。
 import assert from 'node:assert/strict'
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const pluginDir = fileURLToPath(new URL('..', import.meta.url))
 const repoRoot = fileURLToPath(new URL('../../../../../', import.meta.url))
-const cache = join(repoRoot, 'android', '.dsh-cache', 'runtime')
-const vendor = join(cache, 'node_modules', '@deepseek-ai')
+
+/** 找一处能解析到真实 @deepseek-ai/dsh-tools 的 vendor 目录。 */
+function findVendor() {
+  const candidates = [
+    join(pluginDir, 'node_modules', '@deepseek-ai'),
+    join(repoRoot, 'android', '.dsh-cache', 'runtime', 'node_modules', '@deepseek-ai'),
+  ]
+  return candidates.find((dir) => existsSync(join(dir, 'dsh-tools', 'package.json')))
+}
+
+const vendor = findVendor()
+if (vendor === undefined) {
+  console.log('skip: 找不到真实的 @deepseek-ai/dsh-tools（这个仓库零依赖，先跑 tools/bundle-dsh.ps1）')
+  process.exit(0)
+}
 
 const sandbox = mkdtempSync(join(tmpdir(), 'memex-plugin-'))
 try {
