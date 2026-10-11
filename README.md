@@ -3,8 +3,8 @@
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
 [DeepSeek Harness](https://deepseek.com/harness/) (`dsh`) plugin that turns a device UI
-automation bridge into agent tools: read the screen, tap nodes/points, long press,
-type text, press system keys, launch apps and swipe.
+automation bridge into agent tools: read the screen, take screenshots, tap nodes/points,
+long press, type text, press system keys, launch apps and swipe.
 
 This plugin is a thin, platform-independent HTTP client: it registers the tools and
 forwards each call to a **bridge host** that implements the contract below. Reading the
@@ -34,6 +34,13 @@ plugin.
 | `press(key)` | Press `back` / `home` / `recents` / `enter`; use `back` for Esc-like cancel/exit |
 | `launch_app(query)` | Launch an app by fuzzy name or package name |
 | `swipe(direction)` | Swipe one screen `up` / `down` / `left` / `right` |
+| `screenshot()` | Capture the screen and hand the **image** to the model; for apps that expose no node tree, or when icons/images/layout matter |
+
+A `screenshot` image only reaches the model through the **attachment service**
+(`ctx.attachments`): the tool persists the bytes and returns an image content block. Without a
+mounted attachment service it degrades to text (the call still succeeds, the image does not reach
+the model) instead of failing. A bridge host just returns
+`{ mediaType, width, height, base64 }` as the action `payload`.
 
 The tools are app-agnostic atomic actions; the model composes them into tasks.
 
@@ -90,7 +97,7 @@ The mock acknowledges every action and returns a canned `read_screen`.
 POST {ANDROID_BRIDGE_URL}/action
 header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
 body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
-                    | "type_text" | "press" | "launch_app" | "swipe",
+                    | "type_text" | "press" | "launch_app" | "swipe" | "screenshot",
           ...action args }
 ```
 
@@ -106,6 +113,7 @@ Success: `{ "ok": true, "payload": "…" }` — failure: `{ "ok": false, "summar
 | `press` | `key` (`back` / `home` / `recents` / `enter`) | result summary |
 | `launch_app` | `query` (string) | result summary |
 | `swipe` | `direction` (`up` / `down` / `left` / `right`) | result summary |
+| `screenshot` | – | JSON string `{ "mediaType", "width", "height", "base64" }` |
 
 `press_back` remains an optional legacy bridge alias for `press(back)`, but it is not
 registered as a model tool. Keep the bridge local (e.g. loopback) and token-checked:

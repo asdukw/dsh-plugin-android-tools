@@ -8,7 +8,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 export const name = 'dsh-android-tools'
 export const inject = ['tools']
 
-async function call(action, args = {}) {
+/** 调桥并返回整个响应体（截图要拿 summary 之外的 payload）。 */
+async function callResult(action, args = {}) {
   const baseUrl = process.env.ANDROID_BRIDGE_URL
   const token = process.env.ANDROID_BRIDGE_TOKEN
   if (!baseUrl || !token) throw new Error('ANDROID_BRIDGE_URL/ANDROID_BRIDGE_TOKEN not set')
@@ -19,7 +20,25 @@ async function call(action, args = {}) {
   })
   const body = await response.json()
   if (body.ok !== true) throw new Error(body.summary ?? `device action failed: ${action}`)
+  return body
+}
+
+async function call(action, args = {}) {
+  const body = await callResult(action, args)
   return body.payload ?? body.summary ?? 'ok'
+}
+
+/** 解析截图动作的 payload；不是契约形状就回 undefined。 */
+function parseShot(payload) {
+  if (typeof payload !== 'string') return undefined
+  let parsed
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed?.base64 !== 'string' || typeof parsed?.mediaType !== 'string') return undefined
+  return parsed
 }
 
 function deviceTool(options) {
@@ -96,6 +115,47 @@ export function apply(ctx) {
         x: { type: 'integer', description: '没有 ref 时的横坐标像素' },
         y: { type: 'integer', description: '没有 ref 时的纵坐标像素' },
         duration_ms: { type: 'integer', description: '长按毫秒数（300–2000，默认 700）' },
+      },
+    }),
+  )
+  ctx.tools.register(
+    defineTool({
+      name: 'screenshot',
+      description:
+        '截取当前屏幕并把图像交给模型（PNG/JPEG）。读屏拿不到控件树、或要看图标/图片/布局细节时用它；'
+        + '拿到图后用 tap_point 按坐标操作（tap_node 要的是 read_screen 的节点编号）。'
+        + '优先 read_screen —— 图会占请求预算，只在读屏给不出信息时才截。',
+      parameters: {},
+      output: {
+        // dsh 的 value schema DSL 要求对象根显式写死 additionalProperties 的开闭，
+        // 漏了会直接抛错 —— 而 defineTool 抛错会让整个插件的工具都注册不上。
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args, value) => {
+          const blocks = [{ type: 'text', text: value.summary }]
+          if (value.attachment) blocks.push({ type: 'image', attachment: value.attachment })
+          return blocks
+        },
+      },
+      async execute() {
+        const body = await callResult('screenshot')
+        const summary = body.summary ?? '已截图'
+        // 宿主没按契约回 { mediaType, width, height, base64 } 时退回纯文字：
+        // 能截屏但交不了图的宿主（如 mock）不该让这个工具直接抛错。
+        const shot = parseShot(body.payload)
+        if (!shot) {
+          return { summary: `${summary}（宿主未返回图像数据，没能交给模型）` }
+        }
+        // 附件服务由运行时挂载（dsh-android-attachments）；没有它就只能退回文字。
+        const attachments = typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
+        if (!attachments) {
+          return { summary: `${summary}（运行时未挂载附件服务，图像没能交给模型）` }
+        }
+        const attachment = await attachments.saveImage({
+          data: Buffer.from(shot.base64, 'base64'),
+          mediaType: shot.mediaType,
+          name: `screenshot-${shot.width}x${shot.height}`,
+        })
+        return { summary, attachment }
       },
     }),
   )

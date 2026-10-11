@@ -3,7 +3,7 @@
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
 [DeepSeek Harness](https://deepseek.com/harness/)（`dsh`）插件：把设备 UI 自动化桥变成
-agent 工具 —— 读屏、点按、长按、输入、系统键、启动应用、滑动。
+agent 工具 —— 读屏、截图、点按、长按、输入、系统键、启动应用、滑动。
 
 插件本身是一个**平台无关**的薄 HTTP 客户端：它只注册工具并把调用转发给实现下方契约的
 **桥宿主**；读控件树、注入手势等设备相关工作都在宿主里。参考宿主运行在 Android 上
@@ -30,8 +30,13 @@ agent 工具 —— 读屏、点按、长按、输入、系统键、启动应用
 | `press(key)` | 按 `back` / `home` / `recents` / `enter`；取消/退出用 `back` 代替 Esc |
 | `launch_app(query)` | 按应用名（模糊）或包名启动 |
 | `swipe(direction)` | 向 `up` / `down` / `left` / `right` 滑动一屏 |
+| `screenshot()` | 截当前屏幕并把**图像**交给模型；读屏拿不到控件树、或要看图标/图片/版式时用它 |
 
 工具是与具体 App 无关的原子动作，由模型组合成任务。
+`screenshot` 的图要经**附件服务**（`ctx.attachments`）落盘才能进模型请求。宿主没挂
+附件服务时它不会报错，而是退回纯文字（说明截图成功但图没交给模型）。桥宿主把截图编码成
+`{ mediaType, width, height, base64 }` 放进 `payload` 即可。
+
 
 ## 安装
 
@@ -83,7 +88,7 @@ mock 会确认所有动作，并为 `read_screen` 返回一份固定控件树。
 POST {ANDROID_BRIDGE_URL}/action
 header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
 body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
-                    | "type_text" | "press" | "launch_app" | "swipe",
+                    | "type_text" | "press" | "launch_app" | "swipe" | "screenshot",
           ...动作参数 }
 ```
 
@@ -99,6 +104,7 @@ body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
 | `press` | `key`（`back` / `home` / `recents` / `enter`） | 结果摘要 |
 | `launch_app` | `query`（字符串） | 结果摘要 |
 | `swipe` | `direction`（`up` / `down` / `left` / `right`） | 结果摘要 |
+| `screenshot` | – | `{ "mediaType", "width", "height", "base64" }` 的 JSON 字符串 |
 
 Android 宿主仍接受 `press_back` 作为 `press(back)` 的兼容别名，但插件不再把它注册成模型工具。
 桥应只监听本地（如 loopback）并校验 token：读屏内容可能包含个人数据，桥还能驱动设备。
