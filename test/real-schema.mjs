@@ -50,7 +50,7 @@ try {
   const registered = []
   // 真实 defineTool 在 apply 里逐個编译 schema；抛错就说明工具集会被整锅端掉。
   plugin.apply({ tools: { register: (tool) => registered.push(tool) } })
-  assert.equal(registered.length, 9, '9 个工具都要注册成功')
+  assert.equal(registered.length, 10, '10 个工具都要注册成功')
 
   for (const tool of registered) {
     assert.equal(typeof tool.output.render, 'function', `${tool.name} 要有 render`)
@@ -58,14 +58,25 @@ try {
     assert.equal(typeof tool.execute, 'function', `${tool.name} 要有 execute`)
   }
 
-  const shot = registered.find((tool) => tool.name === 'screenshot')
+  const shot = registered.find((tool) => tool.name === 'capture_frame')
   assert.equal(shot.output.schema.type, 'object')
   assert.equal(shot.output.schema.additionalProperties, true, '对象根必须显式开闭')
+
+  // 视觉路径的两个动作必须带 frame_id 与图像像素 bbox —— 少一个参数模型就没法给坐标。
+  // 注意 parameters 已被编译成 JSON Schema（properties / required），不是原始的声明对象。
+  for (const name of ['tap_target', 'long_press_target']) {
+    const tool = registered.find((entry) => entry.name === name)
+    assert.equal(tool.output.schema.type, 'string', `${name} 回字符串`)
+    for (const key of ['frame_id', 'x1', 'y1', 'x2', 'y2']) {
+      assert.ok(tool.parameters.properties?.[key], `${name} 要有参数 ${key}`)
+      assert.ok(tool.parameters.required?.includes(key), `${name} 的参数 ${key} 必须是必填`)
+    }
+  }
 
   // render 是纯函数：附件引用要原样进 image block。
   const withImage = shot.output.render(
     {},
-    { summary: '截图 100x50 png 3KB', attachment: { attachmentId: 'a'.repeat(64) } },
+    { summary: '帧 f1｜图像 100×50 px', attachment: { attachmentId: 'a'.repeat(64) } },
   )
   assert.equal(withImage.length, 2)
   assert.equal(withImage[0].type, 'text')
@@ -73,7 +84,7 @@ try {
   assert.equal(withImage[1].attachment.attachmentId, 'a'.repeat(64))
 
   // 没有附件服务时退回纯文字，不能抛。
-  const textOnly = shot.output.render({}, { summary: '截图（未挂附件服务）' })
+  const textOnly = shot.output.render({}, { summary: '帧 f1（未挂附件服务）' })
   assert.equal(textOnly.length, 1)
   assert.equal(textOnly[0].type, 'text')
 

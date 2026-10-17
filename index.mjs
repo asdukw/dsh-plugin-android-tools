@@ -28,8 +28,8 @@ async function call(action, args = {}) {
   return body.payload ?? body.summary ?? 'ok'
 }
 
-/** 解析截图动作的 payload；不是契约形状就回 undefined。 */
-function parseShot(payload) {
+/** 解析帧 payload（capture_frame 的产物）；不是契约形状就回 undefined。 */
+function parseFrame(payload) {
   if (typeof payload !== 'string') return undefined
   let parsed
   try {
@@ -38,7 +38,27 @@ function parseShot(payload) {
     return undefined
   }
   if (typeof parsed?.base64 !== 'string' || typeof parsed?.mediaType !== 'string') return undefined
+  // frameId 是坐标的锚点：没有它，图能用但 tap_target 无从下手，按「不是契约形状」处理。
+  if (typeof parsed?.frameId !== 'string' || parsed.frameId === '') return undefined
   return parsed
+}
+
+/**
+ * 给模型看的帧图例。
+ *
+ * **模型只看得见工具结果里的文本** —— payload 里的尺寸它读不到。所以「图多大、屏多大、
+ * 坐标该用哪一套」必须写进这段文字：少了它，模型只能拿图像像素当屏幕像素用（实测会偏 12.6%）。
+ */
+function frameLegend(frame) {
+  const { frameId, width, height, screenWidth, screenHeight } = frame
+  const screen = screenWidth && screenHeight ? `｜屏幕 ${screenWidth}×${screenHeight} px` : ''
+  return (
+    `帧 ${frameId}｜图像 ${width}×${height} px${screen}
+`
+    + `坐标一律用本帧的**图像像素**：左上 (0,0)、右下 (${width},${height})；`
+    + `tap_target / long_press_target 都要带 frame_id="${frameId}"。`
+    + '界面变了这一帧就作废，要重新 capture_frame。'
+  )
 }
 
 function deviceTool(options) {
@@ -64,10 +84,8 @@ export function apply(ctx) {
       description:
         '读取当前手机屏幕的控件树，返回形如 "[12] TextView \\"发送\\" clickable @(900,2200)" 的行；'
         + '行首 [n] 是节点编号，用 tap_node 点击它。操作前先读屏，操作后再读一次确认结果。'
-        + '若只返回 0-1 个节点，说明该 App 对无障碍隐藏了控件树（实测微信 8.0.78 只在'
-        + '「触摸探索」开启后启动的进程里暴露节点）：这时停下手上的操作，不要盲点，'
-        + '把情况告诉用户，请他在系统设置 → 应用管理里对该 App 点「强行停止」，'
-        + '然后再重新发起任务。',
+        + '若没有任何可读节点（实测微信 8.0.78 对无障碍隐藏控件树），说明这条路在这里走不通：'
+        + '改用 capture_frame 取一帧看图，再用 tap_target 按帧坐标点击 —— 不要再试 tap_node。',
       parameters: {},
     }),
   )
@@ -83,12 +101,35 @@ export function apply(ctx) {
   )
   ctx.tools.register(
     deviceTool({
-      name: 'tap_point',
-      action: 'tap_point',
-      description: '按屏幕坐标点击（极少需要；优先用 tap_node）。',
+      name: 'tap_target',
+      action: 'tap_target',
+      description:
+        '点击最近一次 capture_frame 里看到的某个目标：给它在该帧**图像像素**里的外框 (x1,y1)-(x2,y2)，'
+        + '执行层取中心换算后下发。坐标是「你在图上看到的那张图」的像素，不是屏幕像素，不要自己换算。'
+        + '结果里会说界面有没有变化：没变通常意味着没点中，就重新 capture_frame 再给一次坐标。',
       parameters: {
-        x: { type: 'integer', required: true, description: '横坐标像素' },
-        y: { type: 'integer', required: true, description: '纵坐标像素' },
+        frame_id: { type: 'string', required: true, description: 'capture_frame 返回的 frame_id' },
+        x1: { type: 'integer', required: true, description: '外框左边界（图像像素）' },
+        y1: { type: 'integer', required: true, description: '外框上边界（图像像素）' },
+        x2: { type: 'integer', required: true, description: '外框右边界（图像像素）' },
+        y2: { type: 'integer', required: true, description: '外框下边界（图像像素）' },
+      },
+    }),
+  )
+  ctx.tools.register(
+    deviceTool({
+      name: 'long_press_target',
+      action: 'long_press_target',
+      description:
+        '长按最近一次 capture_frame 里看到的某个目标，坐标规则与 tap_target 相同（该帧的图像像素外框）。'
+        + '长按时间默认 700ms（可选 300–2000ms）。',
+      parameters: {
+        frame_id: { type: 'string', required: true, description: 'capture_frame 返回的 frame_id' },
+        x1: { type: 'integer', required: true, description: '外框左边界（图像像素）' },
+        y1: { type: 'integer', required: true, description: '外框上边界（图像像素）' },
+        x2: { type: 'integer', required: true, description: '外框右边界（图像像素）' },
+        y2: { type: 'integer', required: true, description: '外框下边界（图像像素）' },
+        duration_ms: { type: 'integer', description: '长按毫秒数（300–2000，默认 700）' },
       },
     }),
   )
@@ -108,23 +149,23 @@ export function apply(ctx) {
       name: 'long_press',
       action: 'long_press',
       description:
-        '长按 read_screen 输出里的节点 [ref]，或长按坐标 (x,y)；优先用 ref。'
-        + '长按时间默认 700ms（可选 300–2000ms）。长按后要再读屏确认菜单/选择状态。',
+        '长按 read_screen 输出里的节点 [ref]（按节点中心点长按）。'
+        + '长按时间默认 700ms（可选 300–2000ms）。长按后要再读屏确认菜单/选择状态。'
+        + '树不可读时改用 long_press_target。',
       parameters: {
-        ref: { type: 'integer', description: 'read_screen 输出行首的节点编号（优先）' },
-        x: { type: 'integer', description: '没有 ref 时的横坐标像素' },
-        y: { type: 'integer', description: '没有 ref 时的纵坐标像素' },
+        ref: { type: 'integer', required: true, description: 'read_screen 输出行首的节点编号' },
         duration_ms: { type: 'integer', description: '长按毫秒数（300–2000，默认 700）' },
       },
     }),
   )
   ctx.tools.register(
     defineTool({
-      name: 'screenshot',
+      name: 'capture_frame',
       description:
-        '截取当前屏幕并把图像交给模型（PNG/JPEG）。读屏拿不到控件树、或要看图标/图片/布局细节时用它；'
-        + '拿到图后用 tap_point 按坐标操作（tap_node 要的是 read_screen 的节点编号）。'
-        + '优先 read_screen —— 图会占请求预算，只在读屏给不出信息时才截。',
+        '截取当前屏幕并交给模型一帧：图 + 帧信息（图像尺寸 / 屏幕尺寸 / frame_id）。'
+        + '读屏拿不到控件树（返回 0-1 行）、或要看图标/图片/布局细节时用它。'
+        + '拿到帧后在图上找到目标，用 tap_target 给出**该帧的图像像素**外框 —— 坐标别自己换算。'
+        + '图会占请求预算，优先 read_screen，只在读屏给不出信息时才截。',
       parameters: {},
       output: {
         // dsh 的 value schema DSL 要求对象根显式写死 additionalProperties 的开闭，
@@ -137,25 +178,26 @@ export function apply(ctx) {
         },
       },
       async execute() {
-        const body = await callResult('screenshot')
-        const summary = body.summary ?? '已截图'
-        // 宿主没按契约回 { mediaType, width, height, base64 } 时退回纯文字：
-        // 能截屏但交不了图的宿主（如 mock）不该让这个工具直接抛错。
-        const shot = parseShot(body.payload)
-        if (!shot) {
-          return { summary: `${summary}（宿主未返回图像数据，没能交给模型）` }
+        const body = await callResult('capture_frame')
+        // 宿主没按契约回帧字段时退回纯文字：能截屏但交不了帧的宿主（如 mock）
+        // 不该让这个工具直接抛错 —— 只是模型拿不到图，也就无从给坐标。
+        const frame = parseFrame(body.payload)
+        if (!frame) {
+          return { summary: `${body.summary ?? '已取帧'}（宿主未返回帧数据，图没能交给模型）` }
         }
+        const legend = frameLegend(frame)
         // 附件服务由运行时挂载（dsh-android-attachments）；没有它就只能退回文字。
         const attachments = typeof ctx.get === 'function' ? ctx.get('attachments') : undefined
         if (!attachments) {
-          return { summary: `${summary}（运行时未挂载附件服务，图像没能交给模型）` }
+          return { summary: `${legend}
+（运行时未挂载附件服务，图没能交给模型）` }
         }
         const attachment = await attachments.saveImage({
-          data: Buffer.from(shot.base64, 'base64'),
-          mediaType: shot.mediaType,
-          name: `screenshot-${shot.width}x${shot.height}`,
+          data: Buffer.from(frame.base64, 'base64'),
+          mediaType: frame.mediaType,
+          name: `frame-${frame.width}x${frame.height}`,
         })
-        return { summary, attachment }
+        return { summary: legend, attachment, frame_id: frame.frameId }
       },
     }),
   )
@@ -190,7 +232,7 @@ export function apply(ctx) {
     deviceTool({
       name: 'swipe',
       action: 'swipe',
-      description: '在屏幕中央向指定方向滑动一屏，用于列表滚动/翻页。',
+      description: '在屏幕中央向指定方向滑动约半屏，用于列表滚动/翻页。',
       parameters: {
         direction: {
           type: 'string',

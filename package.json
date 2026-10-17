@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-android-tools",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Android device automation tools for DeepSeek Harness (dsh): read, tap, long press, type, system keys, launch and swipe over a local HTTP bridge",
   "type": "module",
   "main": "index.mjs",

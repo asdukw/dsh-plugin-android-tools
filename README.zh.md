@@ -24,16 +24,17 @@ agent 工具 —— 读屏、截图、点按、长按、输入、系统键、启
 |---|---|
 | `read_screen` | 读取当前屏幕控件树，输出形如 `[12] TextView "发送" clickable @(900,2200)` 的行 |
 | `tap_node(ref)` | 点击上次 `read_screen` 输出里的节点 |
-| `tap_point(x,y)` | 按屏幕坐标点击（极少需要） |
-| `long_press(ref\|x,y,duration_ms?)` | 长按节点或坐标（默认 700ms，可选 300–2000ms） |
+| `capture_frame()` | 截取一**帧**：图 + 帧信息（图像/屏幕尺寸、`frame_id`） |
+| `tap_target(frame_id,x1,y1,x2,y2)` | 点击你在该帧里看到的目标 —— 外框用**图像像素**，换算由宿主做 |
+| `long_press_target(frame_id,x1,y1,x2,y2,duration_ms?)` | 长按帧里的目标（默认 700ms，可选 300–2000ms） |
+| `long_press(ref,duration_ms?)` | 长按上次 `read_screen` 输出里的节点 |
 | `type_text(text)` | 把文本写进当前聚焦输入框；只输入不发送 |
 | `press(key)` | 按 `back` / `home` / `recents` / `enter`；取消/退出用 `back` 代替 Esc |
 | `launch_app(query)` | 按应用名（模糊）或包名启动 |
-| `swipe(direction)` | 向 `up` / `down` / `left` / `right` 滑动一屏 |
-| `screenshot()` | 截当前屏幕并把**图像**交给模型；读屏拿不到控件树、或要看图标/图片/版式时用它 |
+| `swipe(direction)` | 向 `up` / `down` / `left` / `right` 滑动约半屏 |
 
 工具是与具体 App 无关的原子动作，由模型组合成任务。
-`screenshot` 的图要经**附件服务**（`ctx.attachments`）落盘才能进模型请求。宿主没挂
+`capture_frame` 的图要经**附件服务**（`ctx.attachments`）落盘才能进模型请求。宿主没挂
 附件服务时它不会报错，而是退回纯文字（说明截图成功但图没交给模型）。桥宿主把截图编码成
 `{ mediaType, width, height, base64 }` 放进 `payload` 即可。
 
@@ -87,8 +88,9 @@ mock 会确认所有动作，并为 `read_screen` 返回一份固定控件树。
 ```
 POST {ANDROID_BRIDGE_URL}/action
 header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
-body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
-                    | "type_text" | "press" | "launch_app" | "swipe" | "screenshot",
+body:   { "action": "read_screen" | "tap_node" | "long_press"
+                    | "capture_frame" | "tap_target" | "long_press_target"
+                    | "type_text" | "press" | "launch_app" | "swipe",
           ...动作参数 }
 ```
 
@@ -98,13 +100,14 @@ body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
 |---|---|---|
 | `read_screen` | – | 控件树文本，一行一个节点（`[ref] 类名 "文本" [flags] @(x,y)`） |
 | `tap_node` | `ref`（整数） | 结果摘要 |
-| `tap_point` | `x`、`y`（整数） | 结果摘要 |
-| `long_press` | `ref`，或 `x` + `y`，可选 `duration_ms` | 结果摘要 |
+| `tap_target` | `frame_id`、`x1`、`y1`、`x2`、`y2`（图像像素） | 结果摘要；`changed` 说明界面有没有变 |
+| `long_press_target` | 同 `tap_target`，另加可选 `duration_ms` | 结果摘要；`changed` |
+| `long_press` | `ref`，可选 `duration_ms` | 结果摘要 |
 | `type_text` | `text`（字符串） | 结果摘要 |
 | `press` | `key`（`back` / `home` / `recents` / `enter`） | 结果摘要 |
 | `launch_app` | `query`（字符串） | 结果摘要 |
 | `swipe` | `direction`（`up` / `down` / `left` / `right`） | 结果摘要 |
-| `screenshot` | – | `{ "mediaType", "width", "height", "base64" }` 的 JSON 字符串 |
+| `capture_frame` | – | `{ "mediaType", "width", "height", "frameId", "screenWidth", "screenHeight", "offsetX", "offsetY", "base64" }` 的 JSON 字符串 |
 
 Android 宿主仍接受 `press_back` 作为 `press(back)` 的兼容别名，但插件不再把它注册成模型工具。
 桥应只监听本地（如 loopback）并校验 token：读屏内容可能包含个人数据，桥还能驱动设备。

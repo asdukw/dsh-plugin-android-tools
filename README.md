@@ -3,7 +3,7 @@
 ![test](https://github.com/asdukw/dsh-plugin-android-tools/actions/workflows/test.yml/badge.svg)
 
 [DeepSeek Harness](https://deepseek.com/harness/) (`dsh`) plugin that turns a device UI
-automation bridge into agent tools: read the screen, take screenshots, tap nodes/points,
+automation bridge into agent tools: read the screen, capture frames, tap nodes/targets,
 long press, type text, press system keys, launch apps and swipe.
 
 This plugin is a thin, platform-independent HTTP client: it registers the tools and
@@ -28,15 +28,16 @@ plugin.
 |---|---|
 | `read_screen` | Dump the current screen's node tree as lines like `[12] TextView "Send" clickable @(900,2200)` |
 | `tap_node(ref)` | Tap a node from the last `read_screen` |
-| `tap_point(x,y)` | Tap raw screen coordinates (rarely needed) |
-| `long_press(ref\|x,y,duration_ms?)` | Long-press a node or point (default 700 ms, 300-2000 ms) |
+| `capture_frame()` | Capture a **frame**: the image plus its frame info (image/screen size, `frame_id`) |
+| `tap_target(frame_id,x1,y1,x2,y2)` | Tap a target you saw in that frame — bbox in **image pixels**, the host converts |
+| `long_press_target(frame_id,x1,y1,x2,y2,duration_ms?)` | Long-press a frame target (default 700 ms, 300-2000 ms) |
+| `long_press(ref,duration_ms?)` | Long-press a node from the last `read_screen` |
 | `type_text(text)` | Write text into the focused input; does not send |
 | `press(key)` | Press `back` / `home` / `recents` / `enter`; use `back` for Esc-like cancel/exit |
 | `launch_app(query)` | Launch an app by fuzzy name or package name |
-| `swipe(direction)` | Swipe one screen `up` / `down` / `left` / `right` |
-| `screenshot()` | Capture the screen and hand the **image** to the model; for apps that expose no node tree, or when icons/images/layout matter |
+| `swipe(direction)` | Swipe about half a screen `up` / `down` / `left` / `right` |
 
-A `screenshot` image only reaches the model through the **attachment service**
+A `capture_frame` image only reaches the model through the **attachment service**
 (`ctx.attachments`): the tool persists the bytes and returns an image content block. Without a
 mounted attachment service it degrades to text (the call still succeeds, the image does not reach
 the model) instead of failing. A bridge host just returns
@@ -96,8 +97,9 @@ The mock acknowledges every action and returns a canned `read_screen`.
 ```
 POST {ANDROID_BRIDGE_URL}/action
 header: x-android-bridge-token: <ANDROID_BRIDGE_TOKEN>
-body:   { "action": "read_screen" | "tap_node" | "tap_point" | "long_press"
-                    | "type_text" | "press" | "launch_app" | "swipe" | "screenshot",
+body:   { "action": "read_screen" | "tap_node" | "long_press"
+                    | "capture_frame" | "tap_target" | "long_press_target"
+                    | "type_text" | "press" | "launch_app" | "swipe",
           ...action args }
 ```
 
@@ -107,13 +109,14 @@ Success: `{ "ok": true, "payload": "…" }` — failure: `{ "ok": false, "summar
 |---|---|---|
 | `read_screen` | – | node-tree text, one node per line (`[ref] ClassName "text" [flags] @(x,y)`) |
 | `tap_node` | `ref` (integer) | result summary |
-| `tap_point` | `x`, `y` (integers) | result summary |
-| `long_press` | `ref`, or `x` + `y`, plus optional `duration_ms` | result summary |
+| `tap_target` | `frame_id`, `x1`, `y1`, `x2`, `y2` (image pixels) | result summary; `changed` says whether the screen moved |
+| `long_press_target` | same as `tap_target`, plus optional `duration_ms` | result summary; `changed` |
+| `long_press` | `ref`, plus optional `duration_ms` | result summary |
 | `type_text` | `text` (string) | result summary |
 | `press` | `key` (`back` / `home` / `recents` / `enter`) | result summary |
 | `launch_app` | `query` (string) | result summary |
 | `swipe` | `direction` (`up` / `down` / `left` / `right`) | result summary |
-| `screenshot` | – | JSON string `{ "mediaType", "width", "height", "base64" }` |
+| `capture_frame` | – | JSON string `{ "mediaType", "width", "height", "frameId", "screenWidth", "screenHeight", "offsetX", "offsetY", "base64" }` |
 
 `press_back` remains an optional legacy bridge alias for `press(back)`, but it is not
 registered as a model tool. Keep the bridge local (e.g. loopback) and token-checked:
